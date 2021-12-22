@@ -1,40 +1,27 @@
 const axios = require ('axios').default;
+const util = require ('util');
+//const http = require ('http');
 
-const http = require ('http');
-const port = 5000;
+const express = require('express');
+const app = express();
+const port = 5000
+
 const apiKey = '43XHGE5G5YEZM353AHUDQXTC5SKCYNY9XD';
 
-var server = http.createServer(async (req, res) => {
-	switch (req.url) {
-		case "/mostChangedBalance":
-			console.time('Total');
+app.get('/mostChangedBalance', async (req, res) => {
+	console.time('Total');
+	const responseString = await countTotalChanges();
+	res.send(responseString);
+	console.timeEnd('Total');
 
-			var responseString = await countTotalChanges();
+})
 
-			res.writeHead(200, {'Content-Type': 'application/json'});
-			res.write(responseString);
+app.get('*', (req, res) => res.send("404 PAGE NOT FOUND"));
 
-			res.end();
-
-			console.timeEnd('Total');
-
-			break;
-
-		default:
-        	 
-			res.writeHead(404, {'Content-Type': 'application/json'});
-			res.write("Page not found.");
-
-			res.end();
-
-			break;
-	}
-});
-
-server.listen(port);
+app.listen(port);
 
 function decrementHex(hex) {
-	return (parseInt("0xd2ea5d", 16) - 1).toString(16);
+	return (parseInt(hex, 16) - 1).toString(16);
 }
 
 function hexWeiToDecEth(hex) {
@@ -43,48 +30,69 @@ function hexWeiToDecEth(hex) {
 
 async function countTotalChanges() {
 
-	var response = await axios('https://api.etherscan.io/api?module=proxy&action=eth_blockNumber&apiKey='+apiKey)
+	const response = await axios('https://api.etherscan.io/api?module=proxy&action=eth_blockNumber&apiKey='+apiKey)
 		.catch(error => error);
 
-	var lastBlock = response.data.result;
+	let lastBlock = response.data.result;
 
-	var lastBlockInfo = await axios('https://api.etherscan.io/api?module=proxy&action=eth_getBlockByNumber&tag='+lastBlock+'&boolean=true&apiKey='+apiKey)
+	const lastBlockInfo = await axios('https://api.etherscan.io/api?module=proxy&action=eth_getBlockByNumber&tag='+lastBlock+'&boolean=true&apiKey='+apiKey)
 		.catch(error => error);
 
-	var transactions = new Array();
+	let transactions = new Array();
 
 	transactions = lastBlockInfo.data.result.transactions;	
 
-	while (transactions.length < 100) {
+	let millis = 0;
+	for (let i = 0; i < 100; i++) {
+		
+		const startTime = process.hrtime();
 		lastBlock = decrementHex(lastBlock);
 
-		var prevBlock = await axios('https://api.etherscan.io/api?module=proxy&action=eth_getBlockByNumber&tag='+lastBlock+'&boolean=true&apiKey='+apiKey)
-		.catch(error => error);
+		const prevBlock = await axios('https://api.etherscan.io/api?module=proxy&action=eth_getBlockByNumber&tag='+lastBlock+'&boolean=true&apiKey='+apiKey)
+			.catch(error => error);
 
-		transactions.push(prevBlock.data.transactions);
+		if (prevBlock.data.hasOwnProperty('status')) {
+			if (prevBlock.data.status == 0) {
+				console.log("API timeout");
+			}
+		}
 
+		transactions.push(...prevBlock.data.result.transactions);
+
+		const diffTime = process.hrtime(startTime);
+
+		millis += Math.ceil(diffTime[1]/1000000);
+
+		if ((i + 1) % 3 == 0) {
+			if (millis < 1000) {
+				let sleep = (delay) => new Promise(resolve => setTimeout(resolve, delay), reject => console.log("Error occured during delay"));
+				await sleep(1000-millis);
+			}
+
+			millis = 0;
+			
+		}
 	}
 
-	transactions = transactions.slice(0, 100);
-
-	var balances = new Map();
+	let balances = new Map();
 
 
-	for (var i = 0; i < transactions.length; i++) {
+	for (let i = 0; i < transactions.length; i++) {
 		
-		var trans = transactions[i];
+
+		const trans = transactions[i];
 		
 		if (trans.to == null) continue;
 		
-		var transValue = hexWeiToDecEth(trans.value);
+		const transValue = hexWeiToDecEth(trans.value);
 
-		if (!balances.has(trans.from) || balances.get(trans.from) == undefined) {
+		if (!balances.has(trans.from) || balances.get(trans.from) === undefined) {
 			balances.set(trans.from, 0);
 		}
 
 		balances.set(trans.from, balances.get(trans.from) - transValue);
 
-		if (!balances.has(trans.to) || balances.get(trans.to) == undefined) {
+		if (!balances.has(trans.to) || balances.get(trans.to) === undefined) {
 			balances.set(trans.to, 0);
 		}
 
@@ -96,11 +104,13 @@ async function countTotalChanges() {
 		balances.set(key, Math.abs(balances.get(key)));
 	});
 
-	var sortedBalances = new Map([...balances.entries()].sort((a, b) => b[1] - a[1]));
+	const sortedBalances = new Map([...balances.entries()].sort((a, b) => b[1] - a[1]));
 
-	var firstItem = sortedBalances.keys().next().value;
+	const firstItem = sortedBalances.keys().next().value;
 
-	var responseString = "Address: " + firstItem + " with total change of " + sortedBalances.get(firstItem);
+	const responseString = "Address: " + firstItem + " with total change of " + sortedBalances.get(firstItem);
+
+	console.log("Total transactions: " + transactions.length);
 
 	return responseString;
 }
