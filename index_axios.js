@@ -1,24 +1,24 @@
 const axios = require ('axios').default;
 const util = require ('util');
-//const http = require ('http');
 
 const express = require('express');
 const app = express();
-const port = 5000
+const port = 5000;
 
 const apiKey = '43XHGE5G5YEZM353AHUDQXTC5SKCYNY9XD';
 
 app.get('/mostChangedBalance', async (req, res) => {
 	console.time('Total');
 	const responseString = await countTotalChanges();
-	res.send(responseString);
+	res.status(200).send(responseString);
 	console.timeEnd('Total');
 
 })
 
-app.get('*', (req, res) => res.send("404 PAGE NOT FOUND"));
+app.get('*', (req, res) => res.status(404).send("404 PAGE NOT FOUND"));
 
 app.listen(port);
+
 
 function decrementHex(hex) {
 	return (parseInt(hex, 16) - 1).toString(16);
@@ -50,6 +50,8 @@ async function countTotalChanges() {
 
 		const prevBlock = await axios('https://api.etherscan.io/api?module=proxy&action=eth_getBlockByNumber&tag='+lastBlock+'&boolean=true&apiKey='+apiKey)
 			.catch(error => error);
+
+		console.log("Finished request #" + (i+1));
 
 		if (prevBlock.data.hasOwnProperty('status')) {
 			if (prevBlock.data.status == 0) {
